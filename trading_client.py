@@ -66,7 +66,7 @@ def get_ema(trading_df: pd.DataFrame) -> float:
     ema = trading_df['Close'].loc[base]
     i = base + 1
     while i < len(trading_df):
-        ema = (trading_df['Close'].loc[i]) * (2 / (EMA_LOOKBACK + 1)) + ema
+        ema = (trading_df['Close'].loc[i] - ema) * (2 / (i - base + 1)) + ema
         i += 1
     return ema
 
