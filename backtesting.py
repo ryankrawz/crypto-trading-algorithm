@@ -5,6 +5,7 @@ from pyalgotrade import plotter, strategy
 from pyalgotrade.bar import Bars, Frequency
 from pyalgotrade.barfeed import csvfeed
 from pyalgotrade.stratanalyzer import returns, trades
+from pyalgotrade.technical import ma
 
 from trading_client import ATR_LOOKBACK, EMA_LOOKBACK, MA_LOOKBACK, get_atr, get_ema, get_ma, recalibrate_position
 
@@ -29,6 +30,8 @@ class CryptoMomentumStrategy(strategy.BacktestingStrategy):
         self.ma_look = ma_look
         self.ema_look = ema_look
         self.atr_look = atr_look
+        self.plot_ma = ma.SMA(feed[self.instrument].getPriceDataSeries(), self.ma_look)
+        self.plot_ema = ma.EMA(feed[self.instrument].getPriceDataSeries(), self.ema_look)
         self.longest_look = max([self.ma_look, self.ema_look, self.atr_look])
 
     def onEnterOk(self, position: strategy.position.Position):
@@ -80,16 +83,22 @@ class CryptoMomentumStrategy(strategy.BacktestingStrategy):
         position_mock.return_value = self.current_position
         # Retrieve bars in lookback period and compute MA, EMA, ATR
         data_series = self.getFeed().getDataSeries(self.instrument)
-        ma = self.ma_from_bars(data_series[-self.ma_look:])
-        ema = self.ema_from_bars(data_series[-self.ema_look:])
-        atr = self.atr_from_bars(data_series[-self.atr_look:])
+        ma_for_look = self.ma_from_bars(data_series[-self.ma_look:])
+        ema_for_look = self.ema_from_bars(data_series[-self.ema_look:])
+        atr_for_look = self.atr_from_bars(data_series[-self.atr_look:])
         # Determine if position has been reversed
         long_before = bool(self.long)
         short_before = bool(self.short)
-        recalibrate_position(ma, ema, atr)
+        recalibrate_position(ma_for_look, ema_for_look, atr_for_look)
         if long_before != bool(self.long) or short_before != bool(self.short):
             self.current_position = {}
         self.update_position()
+
+    def get_plot_ma(self):
+        return self.plot_ma
+
+    def get_plot_ema(self):
+        return self.plot_ema
 
     def simulate_market_order(self, **kwargs):
         # No bars have been processed
@@ -131,7 +140,7 @@ class CryptoMomentumStrategy(strategy.BacktestingStrategy):
                 self.current_position['side'] = 'buy'
             # Short position has been entered
             elif self.short:
-                self.current_position['size'] = self.short.getShares()
+                self.current_position['size'] = abs(self.short.getShares())
                 self.current_position['side'] = 'sell'
             # Stop loss was triggered
             else:
@@ -179,6 +188,8 @@ def main():
     momentum_strategy.attachAnalyzer(trades_analyzer)
     # Configure plotter
     plt = plotter.StrategyPlotter(momentum_strategy)
+    plt.getInstrumentSubplot(INSTRUMENT).addDataSeries('MA', momentum_strategy.get_plot_ma())
+    plt.getInstrumentSubplot(INSTRUMENT).addDataSeries('EMA', momentum_strategy.get_plot_ema())
     plt.getOrCreateSubplot('returns').addDataSeries('Simple Returns', returns_analyzer.getReturns())
     # Run strategy
     momentum_strategy.run()
