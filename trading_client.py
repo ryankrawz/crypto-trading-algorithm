@@ -62,7 +62,7 @@ def get_ema(trading_df: pd.DataFrame) -> float:
     ema = trading_df['Close'].loc[base]
     i = base + 1
     while i < len(trading_df):
-        ema = (trading_df['Close'].loc[i] - ema) * (2 / (i - base + 1)) + ema
+        ema = (trading_df['Close'].loc[i] - ema) * (2 / (EMA_LOOKBACK + 1)) + ema
         i += 1
     return ema
 
@@ -129,7 +129,7 @@ def recalibrate_position(ma: float, ema: float, atr: float):
         # Size new position
         account_balance = fetch_account_balance()
         max_amount = EQUITY_AMOUNT * RISK_MULTIPLIER * account_balance
-        risk_adjusted_amount = ((account_balance * RISK_MULTIPLIER) / atr) * account_balance
+        risk_adjusted_amount = ((account_balance * RISK_MULTIPLIER) / (atr * 2)) * account_balance
         new_amount = risk_adjusted_amount if risk_adjusted_amount <= max_amount else max_amount
         # Short position when MA > EMA
         if ma > ema:
