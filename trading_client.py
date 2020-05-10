@@ -21,9 +21,9 @@ EQUITY_AMOUNT = 0.75
 RISK_MULTIPLIER = 0.05
 # Currency of subaccount balance
 EQUITY_CURRENCY = 'USD'
-# Key for the exchange API
+# Key for exchange API
 API_KEY = ''
-# Secret for the exchange API
+# Secret for exchange API
 API_SECRET = ''
 # Name of exchange subaccount
 SUBACCOUNT_NAME = ''
