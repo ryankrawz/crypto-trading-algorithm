@@ -16,7 +16,7 @@ EMA_LOOKBACK = 8
 # Time period for average true range in days
 ATR_LOOKBACK = 14
 # Highest allowable portion of equity for position
-EQUITY_AMOUNT = 0.75
+EQUITY_AMOUNT = 0.001
 # Leverage for sizing position
 RISK_MULTIPLIER = 0.05
 # Currency of subaccount balance
@@ -44,7 +44,7 @@ exchange.check_required_credentials()
 
 
 def retrieve_trading_data() -> pd.DataFrame:
-    longest_lookback = max([MA_LOOKBACK, EMA_LOOKBACK, ATR_LOOKBACK])
+    longest_lookback = max([MA_LOOKBACK, EMA_LOOKBACK, ATR_LOOKBACK + 1])
     # First day of lookback
     start_point = int(time.time() - longest_lookback * 86400) * 1000
     trading_data = exchange.fetch_ohlcv(symbol=CRYPTO_SYMBOL, timeframe=DATA_TIMEFRAME, since=start_point)
@@ -59,10 +59,11 @@ def get_ma(trading_df: pd.DataFrame) -> float:
 
 def get_ema(trading_df: pd.DataFrame) -> float:
     base = len(trading_df) - EMA_LOOKBACK
+    smoothing = 2 / (EMA_LOOKBACK + 1)
     ema = trading_df['Close'].loc[base]
     i = base + 1
     while i < len(trading_df):
-        ema = (trading_df['Close'].loc[i] - ema) * (2 / (EMA_LOOKBACK + 1)) + ema
+        ema = smoothing * trading_df['Close'].loc[i] + (1 - smoothing) * ema
         i += 1
     return ema
 
@@ -72,8 +73,8 @@ def get_atr(trading_df: pd.DataFrame) -> float:
     i = len(trading_df) - ATR_LOOKBACK
     while i < len(trading_df):
         high_low = trading_df['High'].loc[i] - trading_df['Low'].loc[i]
-        high_close = abs(trading_df['High'].loc[i] - trading_df['Close'].loc[i])
-        low_close = abs(trading_df['Low'].loc[i] - trading_df['Close'].loc[i])
+        high_close = abs(trading_df['High'].loc[i] - trading_df['Close'].loc[i - 1])
+        low_close = abs(trading_df['Low'].loc[i] - trading_df['Close'].loc[i - 1])
         total_true_range += max([high_low, high_close, low_close])
         i += 1
     return total_true_range / ATR_LOOKBACK
@@ -104,8 +105,8 @@ def recalibrate_position(ma: float, ema: float, atr: float):
     # Determine if position needs to be reversed
     current = search_current_position()
     if current:
-        # Reverse entire position amount (size of position x estimated market price)
-        order_amount = current['size'] * current['estimatedLiquidationPrice']
+        # Reverse entire position amount
+        order_amount = current['size']
         # Current position is long
         if current['side'] == 'buy':
             # MA > EMA or stop loss exceeded
@@ -129,7 +130,7 @@ def recalibrate_position(ma: float, ema: float, atr: float):
         # Size new position
         account_balance = fetch_account_balance()
         max_amount = EQUITY_AMOUNT * RISK_MULTIPLIER * account_balance
-        risk_adjusted_amount = ((account_balance * RISK_MULTIPLIER) / (atr * 2)) * account_balance
+        risk_adjusted_amount = (account_balance * RISK_MULTIPLIER) / (atr * 2)
         new_amount = risk_adjusted_amount if risk_adjusted_amount <= max_amount else max_amount
         # Short position when MA > EMA
         if ma > ema:

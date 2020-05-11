@@ -32,15 +32,15 @@ class CryptoMomentumStrategy(strategy.BacktestingStrategy):
         self.atr_look = atr_look
         self.plot_ma = ma.SMA(feed[self.instrument].getPriceDataSeries(), self.ma_look)
         self.plot_ema = ma.EMA(feed[self.instrument].getPriceDataSeries(), self.ema_look)
-        self.longest_look = max([self.ma_look, self.ema_look, self.atr_look])
+        self.longest_look = max([self.ma_look, self.ema_look, self.atr_look + 1])
 
     def onEnterOk(self, position: strategy.position.Position):
         # Long position entered
         if self.long == position:
-            self.info('ENTER LONG at ${:.2f}'.format(self.market_price))
+            self.info('ENTER LONG at ${:.2f} ({} shares)'.format(self.market_price, position.getShares()))
         # Short position entered
         elif self.short == position:
-            self.info('ENTER SHORT at ${:.2f}'.format(self.market_price))
+            self.info('ENTER SHORT at ${:.2f} ({} shares)'.format(self.market_price, position.getShares()))
         else:
             self.position_error()
 
@@ -56,12 +56,15 @@ class CryptoMomentumStrategy(strategy.BacktestingStrategy):
     def onExitOk(self, position: strategy.position.Position):
         if self.was_long is None:
             self.position_error()
+        # Determine profit or loss
+        profit_or_loss = position.getReturn()
+        profit_tag = 'profit' if profit_or_loss >= 0 else 'loss'
         # Long position reversed
-        elif self.was_long:
-            self.info('EXIT LONG at ${:.2f}'.format(self.market_price))
+        if self.was_long:
+            self.info('EXIT LONG at ${:.2f} ({} of {:.2%})'.format(self.market_price, profit_tag, profit_or_loss))
         # Short position reversed
         else:
-            self.info('EXIT SHORT at ${:.2f}'.format(self.market_price))
+            self.info('EXIT SHORT at ${:.2f} ({} of {:.2%})'.format(self.market_price, profit_tag, profit_or_loss))
 
     def onExitCanceled(self, position: strategy.position.Position):
         # Resubmit exit on failure
@@ -85,7 +88,7 @@ class CryptoMomentumStrategy(strategy.BacktestingStrategy):
         data_series = self.getFeed().getDataSeries(self.instrument)
         ma_for_look = self.ma_from_bars(data_series[-self.ma_look:])
         ema_for_look = self.ema_from_bars(data_series[-self.ema_look:])
-        atr_for_look = self.atr_from_bars(data_series[-self.atr_look:])
+        atr_for_look = self.atr_from_bars(data_series[-self.atr_look - 1:])
         # Determine if position has been reversed
         long_before = bool(self.long)
         short_before = bool(self.short)
@@ -116,14 +119,12 @@ class CryptoMomentumStrategy(strategy.BacktestingStrategy):
             self.short.exitMarket()
             self.short = None
             return
-        # Convert currency amount to number of shares
-        shares = int(kwargs['amount'] / self.bar.getPrice())
         # Order is to enter a long position
         if kwargs['side'] == 'buy':
-            self.long = self.enterLong(self.instrument, shares, goodTillCanceled=True)
+            self.long = self.enterLong(self.instrument, kwargs['amount'], goodTillCanceled=True)
         # Order is to enter a short position
         elif kwargs['side'] == 'sell':
-            self.short = self.enterShort(self.instrument, shares, goodTillCanceled=True)
+            self.short = self.enterShort(self.instrument, kwargs['amount'], goodTillCanceled=True)
         else:
             self.position_error()
 
