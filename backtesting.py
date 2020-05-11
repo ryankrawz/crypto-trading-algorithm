@@ -92,7 +92,7 @@ class CryptoMomentumStrategy(strategy.BacktestingStrategy):
         # Determine if position has been reversed
         long_before = bool(self.long)
         short_before = bool(self.short)
-        recalibrate_position(ma_for_look, ema_for_look, atr_for_look)
+        recalibrate_position(ma_for_look, ema_for_look, atr_for_look, self.market_price)
         if long_before != bool(self.long) or short_before != bool(self.short):
             self.current_position = {}
         self.update_position()

@@ -16,8 +16,10 @@ EMA_LOOKBACK = 8
 # Time period for average true range in days
 ATR_LOOKBACK = 14
 # Highest allowable portion of equity for position
-EQUITY_AMOUNT = 0.001
+EQUITY_AMOUNT = 0.75
 # Leverage for sizing position
+ACCOUNT_LEVERAGE = 1
+# Risk for sizing position
 RISK_MULTIPLIER = 0.05
 # Currency of subaccount balance
 EQUITY_CURRENCY = 'USD'
@@ -99,7 +101,7 @@ def fetch_account_balance() -> float:
     raise Exception('request failed to retrieve account balance')
 
 
-def recalibrate_position(ma: float, ema: float, atr: float):
+def recalibrate_position(ma: float, ema: float, atr: float, price):
     # Flag to signal when repositioning should occur
     should_reposition = False
     # Determine if position needs to be reversed
@@ -129,7 +131,7 @@ def recalibrate_position(ma: float, ema: float, atr: float):
     if not current or should_reposition:
         # Size new position
         account_balance = fetch_account_balance()
-        max_amount = EQUITY_AMOUNT * RISK_MULTIPLIER * account_balance
+        max_amount = (EQUITY_AMOUNT * ACCOUNT_LEVERAGE * account_balance) / price
         risk_adjusted_amount = (account_balance * RISK_MULTIPLIER) / (atr * 2)
         new_amount = risk_adjusted_amount if risk_adjusted_amount <= max_amount else max_amount
         # Short position when MA > EMA
@@ -145,7 +147,8 @@ def main():
     ma = get_ma(trading_df)
     ema = get_ema(trading_df)
     atr = get_atr(trading_df)
-    recalibrate_position(ma, ema, atr)
+    price = trading_df['Close'].loc[len(trading_df) - 1]
+    recalibrate_position(ma, ema, atr, price)
 
 
 if __name__ == '__main__':
