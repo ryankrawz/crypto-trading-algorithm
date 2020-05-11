@@ -2,6 +2,7 @@ import time
 
 import ccxt
 import pandas as pd
+from stockstats import StockDataFrame
 
 
 # TRADING SETTINGS
@@ -55,31 +56,9 @@ def retrieve_trading_data() -> pd.DataFrame:
     return df
 
 
-def get_ma(trading_df: pd.DataFrame) -> float:
-    return trading_df['Close'][-MA_LOOKBACK:].mean()
-
-
-def get_ema(trading_df: pd.DataFrame) -> float:
-    base = len(trading_df) - EMA_LOOKBACK
-    smoothing = 2 / (EMA_LOOKBACK + 1)
-    ema = trading_df['Close'].loc[base]
-    i = base + 1
-    while i < len(trading_df):
-        ema = smoothing * trading_df['Close'].loc[i] + (1 - smoothing) * ema
-        i += 1
-    return ema
-
-
-def get_atr(trading_df: pd.DataFrame) -> float:
-    total_true_range = 0
-    i = len(trading_df) - ATR_LOOKBACK
-    while i < len(trading_df):
-        high_low = trading_df['High'].loc[i] - trading_df['Low'].loc[i]
-        high_close = abs(trading_df['High'].loc[i] - trading_df['Close'].loc[i - 1])
-        low_close = abs(trading_df['Low'].loc[i] - trading_df['Close'].loc[i - 1])
-        total_true_range += max([high_low, high_close, low_close])
-        i += 1
-    return total_true_range / ATR_LOOKBACK
+def get_indicator(trading_sdf: StockDataFrame, key: str) -> float:
+    # Compute most recent indicator through stock data frame
+    return trading_sdf[key].loc[len(trading_sdf) - 1]
 
 
 def search_current_position() -> dict:
@@ -144,9 +123,13 @@ def recalibrate_position(ma: float, ema: float, atr: float, price):
 
 def main():
     trading_df = retrieve_trading_data()
-    ma = get_ma(trading_df)
-    ema = get_ema(trading_df)
-    atr = get_atr(trading_df)
+    trading_sdf = StockDataFrame.retype(trading_df)
+    ma_key = 'close_' + str(MA_LOOKBACK) + '_sma'
+    ma = get_indicator(trading_sdf, ma_key)
+    ema_key = 'close_' + str(EMA_LOOKBACK) + '_ema'
+    ema = get_indicator(trading_sdf, ema_key)
+    atr_key = 'atr_' + str(ATR_LOOKBACK)
+    atr = get_indicator(trading_sdf, atr_key)
     price = trading_df['Close'].loc[len(trading_df) - 1]
     recalibrate_position(ma, ema, atr, price)
 

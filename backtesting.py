@@ -6,8 +6,9 @@ from pyalgotrade.bar import Bars, Frequency
 from pyalgotrade.barfeed import csvfeed
 from pyalgotrade.stratanalyzer import returns, trades
 from pyalgotrade.technical import ma
+from stockstats import StockDataFrame
 
-from trading_client import ATR_LOOKBACK, EMA_LOOKBACK, MA_LOOKBACK, get_atr, get_ema, get_ma, recalibrate_position
+from trading_client import ATR_LOOKBACK, EMA_LOOKBACK, MA_LOOKBACK, get_indicator, recalibrate_position
 
 
 # CSV file to load data for backtesting
@@ -27,12 +28,9 @@ class CryptoMomentumStrategy(strategy.BacktestingStrategy):
         self.market_price = 0
         self.current_position = {}
         self.was_long = None
-        self.ma_look = ma_look
-        self.ema_look = ema_look
-        self.atr_look = atr_look
-        self.plot_ma = ma.SMA(feed[self.instrument].getPriceDataSeries(), self.ma_look)
-        self.plot_ema = ma.EMA(feed[self.instrument].getPriceDataSeries(), self.ema_look)
-        self.longest_look = max([self.ma_look, self.ema_look, self.atr_look + 1])
+        self.plot_ma = ma.SMA(feed[self.instrument].getPriceDataSeries(), ma_look)
+        self.plot_ema = ma.EMA(feed[self.instrument].getPriceDataSeries(), ema_look)
+        self.longest_look = max([ma_look, ema_look, atr_look + 1])
 
     def onEnterOk(self, position: strategy.position.Position):
         # Long position entered
@@ -80,22 +78,26 @@ class CryptoMomentumStrategy(strategy.BacktestingStrategy):
         self.bar_count += 1
         if self.bar_count < self.longest_look:
             return
+        # Update current market price if position exists
+        if bool(self.current_position):
+            self.current_position['estimatedLiquidationPrice'] = self.market_price
         # Mock execution of market orders and information on balance and positions
         order_mock.side_effect = self.simulate_market_order
         balance_mock.return_value = self.getBroker().getEquity()
         position_mock.return_value = self.current_position
         # Retrieve bars in lookback period and compute MA, EMA, ATR
-        data_series = self.getFeed().getDataSeries(self.instrument)
-        ma_for_look = self.ma_from_bars(data_series[-self.ma_look:])
-        ema_for_look = self.ema_from_bars(data_series[-self.ema_look:])
-        atr_for_look = self.atr_from_bars(data_series[-self.atr_look - 1:])
+        data_series = self.getFeed().getDataSeries(self.instrument)[-self.longest_look:]
+        ma_for_look = self.ma_from_bars(data_series)
+        ema_for_look = self.ema_from_bars(data_series)
+        atr_for_look = self.atr_from_bars(data_series)
         # Determine if position has been reversed
         long_before = bool(self.long)
         short_before = bool(self.short)
         recalibrate_position(ma_for_look, ema_for_look, atr_for_look, self.market_price)
+        # Update entry price, size, and side if position is new
         if long_before != bool(self.long) or short_before != bool(self.short):
             self.current_position = {}
-        self.update_position()
+            self.update_position()
 
     def get_plot_ma(self):
         return self.plot_ma
@@ -129,35 +131,36 @@ class CryptoMomentumStrategy(strategy.BacktestingStrategy):
             self.position_error()
 
     def update_position(self):
-        has_previous_position = bool(self.current_position)
-        # Update current market price
-        self.current_position['estimatedLiquidationPrice'] = self.bar.getPrice()
-        # Update entry price, size, and side if position is new
-        if not has_previous_position:
-            self.current_position['entryPrice'] = self.bar.getPrice()
-            # Long position has been entered
-            if self.long:
-                self.current_position['size'] = self.long.getShares()
-                self.current_position['side'] = 'buy'
-            # Short position has been entered
-            elif self.short:
-                self.current_position['size'] = abs(self.short.getShares())
-                self.current_position['side'] = 'sell'
-            # Stop loss was triggered
-            else:
-                self.current_position = {}
+        self.current_position['entryPrice'] = self.market_price
+        # Long position has been entered
+        if self.long:
+            self.current_position['size'] = self.long.getShares()
+            self.current_position['side'] = 'buy'
+        # Short position has been entered
+        elif self.short:
+            self.current_position['size'] = abs(self.short.getShares())
+            self.current_position['side'] = 'sell'
+        # Stop loss was triggered
+        else:
+            self.current_position = {}
 
     @staticmethod
     def ma_from_bars(bars: Bars) -> float:
         # Convert array of bars to data frame with 'Close' column
         df = pd.concat([pd.DataFrame([bar.getClose()], columns=['Close']) for bar in bars], ignore_index=True)
-        return get_ma(df)
+        # Convert data frame to stock data frame
+        sdf = StockDataFrame.retype(df)
+        ma_key = 'close_' + str(MA_LOOKBACK) + '_sma'
+        return get_indicator(sdf, ma_key)
 
     @staticmethod
     def ema_from_bars(bars: Bars) -> float:
         # Convert array of bars to data frame with 'Close' column
         df = pd.concat([pd.DataFrame([bar.getClose()], columns=['Close']) for bar in bars], ignore_index=True)
-        return get_ema(df)
+        # Convert data frame to stock data frame
+        sdf = StockDataFrame.retype(df)
+        ema_key = 'close_' + str(EMA_LOOKBACK) + '_ema'
+        return get_indicator(sdf, ema_key)
 
     @staticmethod
     def atr_from_bars(bars: Bars) -> float:
@@ -169,7 +172,10 @@ class CryptoMomentumStrategy(strategy.BacktestingStrategy):
             ) for bar in bars],
             ignore_index=True,
         )
-        return get_atr(df)
+        # Convert data frame to stock data frame
+        sdf = StockDataFrame.retype(df)
+        atr_key = 'atr_' + str(ATR_LOOKBACK)
+        return get_indicator(sdf, atr_key)
 
     @staticmethod
     def position_error():
@@ -194,7 +200,7 @@ def main():
     plt.getOrCreateSubplot('returns').addDataSeries('Simple Returns', returns_analyzer.getReturns())
     # Run strategy
     momentum_strategy.run()
-    momentum_strategy.info('Final portfolio value: {}'.format(momentum_strategy.getResult()))
+    momentum_strategy.info('Final portfolio value: ${:.2f}'.format(momentum_strategy.getResult()))
     # Plot strategy
     plt.plot()
 
