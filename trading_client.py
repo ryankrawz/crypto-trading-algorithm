@@ -1,3 +1,4 @@
+from datetime import date, datetime
 import time
 
 import ccxt
@@ -47,7 +48,7 @@ exchange.check_required_credentials()
 
 
 def retrieve_trading_data() -> pd.DataFrame:
-    longest_lookback = max([MA_LOOKBACK, EMA_LOOKBACK, ATR_LOOKBACK + 1])
+    longest_lookback = 4 * max([MA_LOOKBACK, EMA_LOOKBACK, ATR_LOOKBACK + 1])
     # First day of lookback
     start_point = int(time.time() - longest_lookback * 86400) * 1000
     trading_data = exchange.fetch_ohlcv(symbol=CRYPTO_SYMBOL, timeframe=DATA_TIMEFRAME, since=start_point)
@@ -59,6 +60,21 @@ def retrieve_trading_data() -> pd.DataFrame:
 def get_indicator(trading_sdf: StockDataFrame, key: str) -> float:
     # Compute most recent indicator through stock data frame
     return trading_sdf[key].loc[len(trading_sdf) - 1]
+
+
+def stop_was_triggered() -> bool:
+    # Method for fetching recent stop orders, unique to FTX
+    order_info = exchange.private_get_conditional_orders_history({'market': CRYPTO_SYMBOL, 'limit': 1})
+    if order_info['success']:
+        if len(order_info['result']) > 0:
+            last_stop_order = order_info['result'][0]
+            if bool(last_stop_order['triggeredAt']):
+                # Determine if stop was triggered same day
+                formatted_time_string = ''.join(last_stop_order['triggeredAt'].rsplit(':', 1))
+                stop_date = datetime.strptime(formatted_time_string, '%Y-%m-%dT%H:%M:%S.%f%z')
+                return stop_date.date() == date.today()
+        return False
+    raise Exception('request failed to retrieve stop order history')
 
 
 def search_current_position() -> dict:
@@ -81,6 +97,9 @@ def fetch_account_balance() -> float:
 
 
 def recalibrate_position(ma: float, ema: float, atr: float, price):
+    # Terminate positioning if stop was triggered same day
+    if WAIT_IF_STOP_LOSS and stop_was_triggered():
+        return
     # Flag to signal when repositioning should occur
     should_reposition = False
     # Determine if position needs to be reversed
@@ -88,24 +107,14 @@ def recalibrate_position(ma: float, ema: float, atr: float, price):
     if current:
         # Reverse entire position amount
         order_amount = current['size']
-        # Current position is long
-        if current['side'] == 'buy':
-            # MA > EMA or stop loss exceeded
-            if ma > ema or current['entryPrice'] - current['estimatedLiquidationPrice'] >= atr:
-                exchange.create_order(symbol=CRYPTO_SYMBOL, type='market', side='sell', amount=order_amount)
-                # Decide not to reposition if stop loss exceeded
-                if current['entryPrice'] - current['estimatedLiquidationPrice'] >= atr and WAIT_IF_STOP_LOSS:
-                    return
-                should_reposition = True
-        # Current position is short
-        elif current['side'] == 'sell':
-            # EMA > MA or stop loss exceeded
-            if ema > ma or current['estimatedLiquidationPrice'] - current['entryPrice'] >= atr:
-                exchange.create_order(symbol=CRYPTO_SYMBOL, type='market', side='buy', amount=order_amount)
-                # Decide not to reposition if stop loss exceeded
-                if current['estimatedLiquidationPrice'] - current['entryPrice'] >= atr and WAIT_IF_STOP_LOSS:
-                    return
-                should_reposition = True
+        # Current position is long and MA > EMA
+        if current['side'] == 'buy' and ma > ema:
+            exchange.create_order(CRYPTO_SYMBOL, 'market', 'sell', order_amount)
+            should_reposition = True
+        # Current position is short and EMA > MA
+        elif current['side'] == 'sell' and ema > ma:
+            exchange.create_order(CRYPTO_SYMBOL, 'market', 'buy', order_amount)
+            should_reposition = True
     # Position is being reversed or no position exists
     if not current or should_reposition:
         # Size new position
@@ -113,12 +122,19 @@ def recalibrate_position(ma: float, ema: float, atr: float, price):
         max_amount = (EQUITY_AMOUNT * ACCOUNT_LEVERAGE * account_balance) / price
         risk_adjusted_amount = (account_balance * RISK_MULTIPLIER) / (atr * 2)
         new_amount = risk_adjusted_amount if risk_adjusted_amount <= max_amount else max_amount
+        # Trigger price and reduce-only options for FTX stop order
+        stop_params = {
+            'type': 'stop',
+            'reduceOnly': True,
+        }
         # Short position when MA > EMA
         if ma > ema:
-            exchange.create_order(symbol=CRYPTO_SYMBOL, type='market', side='sell', amount=new_amount)
+            stop_params['triggerPrice'] = price + atr * 2
+            exchange.create_order(CRYPTO_SYMBOL, 'market', 'sell', new_amount, params=stop_params)
         # Long position when EMA > MA
         elif ema > ma:
-            exchange.create_order(symbol=CRYPTO_SYMBOL, type='market', side='buy', amount=new_amount)
+            stop_params['triggerPrice'] = price - atr * 2
+            exchange.create_order(CRYPTO_SYMBOL, 'market', 'buy', new_amount, params=stop_params)
 
 
 def main():

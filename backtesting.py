@@ -12,7 +12,7 @@ from trading_client import ATR_LOOKBACK, EMA_LOOKBACK, MA_LOOKBACK, get_indicato
 
 
 # CSV file to load data for backtesting
-BACKTESTING_DATA = 'backtesting_data/btcusd_from_2015.csv'
+BACKTESTING_DATA = 'backtesting_data/bitstamp_btcusd_from_2014.csv'
 # Current cryptocurrency instrument to backtest on
 INSTRUMENT = 'BTC-USD'
 
@@ -30,7 +30,7 @@ class CryptoMomentumStrategy(strategy.BacktestingStrategy):
         self.was_long = None
         self.plot_ma = ma.SMA(feed[self.instrument].getPriceDataSeries(), ma_look)
         self.plot_ema = ma.EMA(feed[self.instrument].getPriceDataSeries(), ema_look)
-        self.longest_look = max([ma_look, ema_look, atr_look + 1])
+        self.longest_look = 4 * max([ma_look, ema_look, atr_look + 1])
 
     def onEnterOk(self, position: strategy.position.Position):
         # Long position entered
@@ -68,23 +68,22 @@ class CryptoMomentumStrategy(strategy.BacktestingStrategy):
         # Resubmit exit on failure
         position.exitMarket()
 
+    @mock.patch('trading_client.stop_was_triggered')
     @mock.patch('trading_client.search_current_position')
     @mock.patch('trading_client.fetch_account_balance')
     @mock.patch('ccxt.ftx.create_order')
-    def onBars(self, bars: Bars, order_mock, balance_mock, position_mock):
+    def onBars(self, bars: Bars, order_mock, balance_mock, position_mock, trigger_mock):
         self.bar = bars[self.instrument]
         self.market_price = self.bar.getPrice()
         # Wait for enough bars to be available for calculating MA, EMA, ATR
         self.bar_count += 1
         if self.bar_count < self.longest_look:
             return
-        # Update current market price if position exists
-        if bool(self.current_position):
-            self.current_position['estimatedLiquidationPrice'] = self.market_price
         # Mock execution of market orders and information on balance and positions
         order_mock.side_effect = self.simulate_market_order
         balance_mock.return_value = self.getBroker().getEquity()
         position_mock.return_value = self.current_position
+        trigger_mock.return_value = not (bool(self.current_position) or self.bar_count == self.longest_look)
         # Retrieve bars in lookback period and compute MA, EMA, ATR
         data_series = self.getFeed().getDataSeries(self.instrument)[-self.longest_look:]
         ma_for_look = self.ma_from_bars(data_series)
@@ -105,7 +104,7 @@ class CryptoMomentumStrategy(strategy.BacktestingStrategy):
     def get_plot_ema(self):
         return self.plot_ema
 
-    def simulate_market_order(self, **kwargs):
+    def simulate_market_order(self, *args, params=None):
         # No bars have been processed
         if not self.bar:
             return
@@ -122,11 +121,11 @@ class CryptoMomentumStrategy(strategy.BacktestingStrategy):
             self.short = None
             return
         # Order is to enter a long position
-        if kwargs['side'] == 'buy':
-            self.long = self.enterLong(self.instrument, kwargs['amount'], goodTillCanceled=True)
+        if args[2] == 'buy':
+            self.long = self.enterLongStop(self.instrument, params['triggerPrice'], args[3], goodTillCanceled=True)
         # Order is to enter a short position
-        elif kwargs['side'] == 'sell':
-            self.short = self.enterShort(self.instrument, kwargs['amount'], goodTillCanceled=True)
+        elif args[2] == 'sell':
+            self.short = self.enterShortStop(self.instrument, params['triggerPrice'], args[3], goodTillCanceled=True)
         else:
             self.position_error()
 
@@ -140,7 +139,7 @@ class CryptoMomentumStrategy(strategy.BacktestingStrategy):
         elif self.short:
             self.current_position['size'] = abs(self.short.getShares())
             self.current_position['side'] = 'sell'
-        # Stop loss was triggered
+        # Stop was triggered
         else:
             self.current_position = {}
 
