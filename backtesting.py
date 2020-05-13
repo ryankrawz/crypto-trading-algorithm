@@ -202,7 +202,3 @@ def main():
     momentum_strategy.info('Final portfolio value: ${:.2f}'.format(momentum_strategy.getResult()))
     # Plot strategy
     plt.plot()
-
-
-if __name__ == '__main__':
-    main()

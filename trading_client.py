@@ -62,7 +62,7 @@ def get_indicator(trading_sdf: StockDataFrame, key: str) -> float:
     return trading_sdf[key].loc[len(trading_sdf) - 1]
 
 
-def stop_was_triggered() -> bool:
+def stop_id_and_trigger_status() -> dict:
     # Method for fetching recent stop orders, unique to FTX
     order_info = exchange.private_get_conditional_orders_history({'market': CRYPTO_SYMBOL, 'limit': 1})
     if order_info['success']:
@@ -72,8 +72,8 @@ def stop_was_triggered() -> bool:
                 # Determine if stop was triggered same day
                 formatted_time_string = ''.join(last_stop_order['triggeredAt'].rsplit(':', 1))
                 stop_date = datetime.strptime(formatted_time_string, '%Y-%m-%dT%H:%M:%S.%f%z')
-                return stop_date.date() == date.today()
-        return False
+                return {'id': str(last_stop_order['id']), 'wasTriggered': stop_date.date() == date.today()}
+        return {'id': None, 'wasTriggered': False}
     raise Exception('request failed to retrieve stop order history')
 
 
@@ -82,7 +82,9 @@ def search_current_position() -> dict:
     current_positions = exchange.private_get_positions()
     if current_positions['success']:
         if len(current_positions['result']) > 0:
-            return current_positions['result'][0]
+            latest_position = current_positions['result'][0]
+            if latest_position['size'] > 0:
+                return latest_position
         return {}
     raise Exception('request failed to retrieve account positions')
 
@@ -97,8 +99,9 @@ def fetch_account_balance() -> float:
 
 
 def recalibrate_position(ma: float, ema: float, atr: float, price):
+    stop_order_info = stop_id_and_trigger_status()
     # Terminate positioning if stop was triggered same day
-    if WAIT_IF_STOP_LOSS and stop_was_triggered():
+    if WAIT_IF_STOP_LOSS and stop_order_info['wasTriggered']:
         return
     # Flag to signal when repositioning should occur
     should_reposition = False
@@ -117,6 +120,8 @@ def recalibrate_position(ma: float, ema: float, atr: float, price):
             should_reposition = True
     # Position is being reversed or no position exists
     if not current or should_reposition:
+        # Cancel pending stop orders
+        exchange.cancel_all_orders(CRYPTO_SYMBOL)
         # Size new position
         account_balance = fetch_account_balance()
         max_amount = (EQUITY_AMOUNT * ACCOUNT_LEVERAGE * account_balance) / price
@@ -124,17 +129,18 @@ def recalibrate_position(ma: float, ema: float, atr: float, price):
         new_amount = risk_adjusted_amount if risk_adjusted_amount <= max_amount else max_amount
         # Trigger price and reduce-only options for FTX stop order
         stop_params = {
-            'type': 'stop',
             'reduceOnly': True,
         }
         # Short position when MA > EMA
         if ma > ema:
             stop_params['triggerPrice'] = price + atr * 2
-            exchange.create_order(CRYPTO_SYMBOL, 'market', 'sell', new_amount, params=stop_params)
+            exchange.create_order(CRYPTO_SYMBOL, 'market', 'sell', new_amount)
+            exchange.create_order(CRYPTO_SYMBOL, 'stop', 'buy', new_amount, params=stop_params)
         # Long position when EMA > MA
         elif ema > ma:
             stop_params['triggerPrice'] = price - atr * 2
-            exchange.create_order(CRYPTO_SYMBOL, 'market', 'buy', new_amount, params=stop_params)
+            exchange.create_order(CRYPTO_SYMBOL, 'market', 'buy', new_amount)
+            exchange.create_order(CRYPTO_SYMBOL, 'stop', 'sell', new_amount, params=stop_params)
 
 
 def main():
@@ -146,9 +152,5 @@ def main():
     ema = get_indicator(trading_sdf, ema_key)
     atr_key = 'atr_' + str(ATR_LOOKBACK)
     atr = get_indicator(trading_sdf, atr_key)
-    price = trading_df['Close'].loc[len(trading_df) - 1]
+    price = trading_df['close'].loc[len(trading_df) - 1]
     recalibrate_position(ma, ema, atr, price)
-
-
-if __name__ == '__main__':
-    main()
