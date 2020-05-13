@@ -62,7 +62,7 @@ def get_indicator(trading_sdf: StockDataFrame, key: str) -> float:
     return trading_sdf[key].loc[len(trading_sdf) - 1]
 
 
-def stop_id_and_trigger_status() -> dict:
+def stop_was_triggered() -> bool:
     # Method for fetching recent stop orders, unique to FTX
     order_info = exchange.private_get_conditional_orders_history({'market': CRYPTO_SYMBOL, 'limit': 1})
     if order_info['success']:
@@ -72,8 +72,8 @@ def stop_id_and_trigger_status() -> dict:
                 # Determine if stop was triggered same day
                 formatted_time_string = ''.join(last_stop_order['triggeredAt'].rsplit(':', 1))
                 stop_date = datetime.strptime(formatted_time_string, '%Y-%m-%dT%H:%M:%S.%f%z')
-                return {'id': str(last_stop_order['id']), 'wasTriggered': stop_date.date() == date.today()}
-        return {'id': None, 'wasTriggered': False}
+                return stop_date.date() == date.today()
+        return False
     raise Exception('request failed to retrieve stop order history')
 
 
@@ -99,9 +99,8 @@ def fetch_account_balance() -> float:
 
 
 def recalibrate_position(ma: float, ema: float, atr: float, price):
-    stop_order_info = stop_id_and_trigger_status()
     # Terminate positioning if stop was triggered same day
-    if WAIT_IF_STOP_LOSS and stop_order_info['wasTriggered']:
+    if WAIT_IF_STOP_LOSS and stop_was_triggered():
         return
     # Flag to signal when repositioning should occur
     should_reposition = False
