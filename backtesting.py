@@ -71,8 +71,9 @@ class CryptoMomentumStrategy(strategy.BacktestingStrategy):
     @mock.patch('trading_client.stop_was_triggered')
     @mock.patch('trading_client.search_current_position')
     @mock.patch('trading_client.fetch_account_balance')
+    @mock.patch('ccxt.ftx.cancel_all_orders')
     @mock.patch('ccxt.ftx.create_order')
-    def onBars(self, bars: Bars, order_mock, balance_mock, position_mock, trigger_mock):
+    def onBars(self, bars: Bars, order_mock, cancel_mock, balance_mock, position_mock, trigger_mock):
         self.bar = bars[self.instrument]
         self.market_price = self.bar.getPrice()
         # Wait for enough bars to be available for calculating MA, EMA, ATR
@@ -81,9 +82,10 @@ class CryptoMomentumStrategy(strategy.BacktestingStrategy):
             return
         # Mock execution of market orders and information on balance and positions
         order_mock.side_effect = self.simulate_market_order
+        cancel_mock.side_effect = lambda s: None
         balance_mock.return_value = self.getBroker().getEquity()
         position_mock.return_value = self.current_position
-        trigger_mock.return_value = not (bool(self.current_position) or self.bar_count == self.longest_look)
+        trigger_mock.return_value = False
         # Retrieve bars in lookback period and compute MA, EMA, ATR
         data_series = self.getFeed().getDataSeries(self.instrument)[-self.longest_look:]
         ma_for_look = self.ma_from_bars(data_series)
@@ -105,8 +107,8 @@ class CryptoMomentumStrategy(strategy.BacktestingStrategy):
         return self.plot_ema
 
     def simulate_market_order(self, *args, params=None):
-        # No bars have been processed
-        if not self.bar:
+        # No bars have been processed or order does not have trigger price
+        if not (self.bar and bool(params)):
             return
         # Order is to reverse a long position
         if self.long:
@@ -120,12 +122,12 @@ class CryptoMomentumStrategy(strategy.BacktestingStrategy):
             self.short.exitMarket()
             self.short = None
             return
-        # Order is to enter a long position
+        # Order is stop for a short position
         if args[2] == 'buy':
-            self.long = self.enterLongStop(self.instrument, params['triggerPrice'], args[3], goodTillCanceled=True)
-        # Order is to enter a short position
-        elif args[2] == 'sell':
             self.short = self.enterShortStop(self.instrument, params['triggerPrice'], args[3], goodTillCanceled=True)
+        # Order is stop for a long position
+        elif args[2] == 'sell':
+            self.long = self.enterLongStop(self.instrument, params['triggerPrice'], args[3], goodTillCanceled=True)
         else:
             self.position_error()
 
@@ -202,3 +204,7 @@ def main():
     momentum_strategy.info('Final portfolio value: ${:.2f}'.format(momentum_strategy.getResult()))
     # Plot strategy
     plt.plot()
+
+
+if __name__ == '__main__':
+    main()
