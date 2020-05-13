@@ -98,7 +98,7 @@ def fetch_account_balance() -> float:
     raise Exception('request failed to retrieve account balance')
 
 
-def recalibrate_position(ma: float, ema: float, atr: float, price):
+def recalibrate_position(ma: float, ema: float, atr: float, price: float):
     # Terminate positioning if stop was triggered same day
     if WAIT_IF_STOP_LOSS and stop_was_triggered():
         return

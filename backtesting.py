@@ -98,10 +98,10 @@ class CryptoMomentumStrategy(strategy.BacktestingStrategy):
             self.current_position = {}
             self.update_position()
 
-    def get_plot_ma(self):
+    def get_plot_ma(self) -> ma.SMA:
         return self.plot_ma
 
-    def get_plot_ema(self):
+    def get_plot_ema(self) -> ma.EMA:
         return self.plot_ema
 
     def simulate_market_order(self, *args, params=None):
