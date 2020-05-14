@@ -20,9 +20,9 @@ ATR_LOOKBACK = 14
 # Highest allowable portion of equity for position
 EQUITY_AMOUNT = 0.75
 # Leverage for sizing position
-ACCOUNT_LEVERAGE = 1
+ACCOUNT_LEVERAGE = 5
 # Risk for sizing position
-RISK_MULTIPLIER = 0.05
+RISK_MULTIPLIER = 0.10
 # Currency of subaccount balance
 EQUITY_CURRENCY = 'USD'
 # Key for exchange API
@@ -142,7 +142,7 @@ def recalibrate_position(ma: float, ema: float, atr: float, price: float):
             exchange.create_order(CRYPTO_SYMBOL, 'stop', 'sell', new_amount, params=stop_params)
 
 
-def main():
+def main(data, context):
     trading_df = retrieve_trading_data()
     trading_sdf = StockDataFrame.retype(trading_df)
     ma_key = 'close_' + str(MA_LOOKBACK) + '_sma'
