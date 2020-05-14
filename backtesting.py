@@ -85,7 +85,7 @@ class CryptoMomentumStrategy(strategy.BacktestingStrategy):
         cancel_mock.side_effect = lambda s: None
         balance_mock.return_value = self.getBroker().getEquity()
         position_mock.return_value = self.current_position
-        trigger_mock.return_value = False
+        trigger_mock.return_value = not (bool(self.current_position) or self.bar_count == self.longest_look)
         # Retrieve bars in lookback period and compute MA, EMA, ATR
         data_series = self.getFeed().getDataSeries(self.instrument)[-self.longest_look:]
         ma_for_look = self.ma_from_bars(data_series)
@@ -108,7 +108,7 @@ class CryptoMomentumStrategy(strategy.BacktestingStrategy):
 
     def simulate_market_order(self, *args, params=None):
         # No bars have been processed
-        if not self.bar:
+        if not bool(self.bar):
             return
         if not bool(params):
             # Order is to reverse a long position
