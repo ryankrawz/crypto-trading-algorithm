@@ -107,20 +107,20 @@ class CryptoMomentumStrategy(strategy.BacktestingStrategy):
         return self.plot_ema
 
     def simulate_market_order(self, *args, params=None):
-        # No bars have been processed or order does not have trigger price
-        if not (self.bar and bool(params)):
+        # No bars have been processed
+        if not self.bar:
             return
-        # Order is to reverse a long position
-        if self.long:
-            self.was_long = True
-            self.long.exitMarket()
-            self.long = None
-            return
-        # Order is to reverse a short position
-        if self.short:
-            self.was_long = False
-            self.short.exitMarket()
-            self.short = None
+        if not bool(params):
+            # Order is to reverse a long position
+            if self.long:
+                self.was_long = True
+                self.long.exitMarket()
+                self.long = None
+            # Order is to reverse a short position
+            if self.short:
+                self.was_long = False
+                self.short.exitMarket()
+                self.short = None
             return
         # Order is stop for a short position
         if args[2] == 'buy':
