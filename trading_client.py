@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import time
 
 import ccxt
@@ -68,11 +68,11 @@ def stop_was_triggered() -> bool:
     if order_info['success']:
         if len(order_info['result']) > 0:
             last_stop_order = order_info['result'][0]
-            if bool(last_stop_order['triggeredAt']):
-                # Determine if stop was triggered same day
+            if last_stop_order['triggeredAt']:
+                # Determine if stop was triggered in last trading day
                 formatted_time_string = ''.join(last_stop_order['triggeredAt'].rsplit(':', 1))
                 stop_date = datetime.strptime(formatted_time_string, '%Y-%m-%dT%H:%M:%S.%f%z')
-                return stop_date.date() == date.today()
+                return stop_date.date() in [date.today(), date.today() - timedelta(days=1)]
         return False
     raise Exception('request failed to retrieve stop order history')
 
@@ -99,7 +99,7 @@ def fetch_account_balance() -> float:
 
 
 def recalibrate_position(ma: float, ema: float, atr: float, price: float):
-    # Terminate positioning if stop was triggered same day
+    # Terminate positioning if stop was triggered in last trading day
     if WAIT_IF_STOP_LOSS and stop_was_triggered():
         return
     # Flag to signal when repositioning should occur
