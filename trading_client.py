@@ -120,7 +120,10 @@ def recalibrate_position(ma: float, ema: float, atr: float, price: float):
     # Position is being reversed or no position exists
     if not current or should_reposition:
         # Cancel pending stop orders
-        exchange.cancel_all_orders(CRYPTO_SYMBOL)
+        cancel_params = {
+            'conditionalOrdersOnly': True,
+        }
+        exchange.cancel_all_orders(CRYPTO_SYMBOL, params=cancel_params)
         # Size new position
         account_balance = fetch_account_balance()
         max_amount = (EQUITY_AMOUNT * ACCOUNT_LEVERAGE * account_balance) / price
