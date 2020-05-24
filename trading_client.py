@@ -81,10 +81,9 @@ def search_current_position() -> dict:
     # Method for fetching current positions, unique to FTX
     current_positions = exchange.private_get_positions()
     if current_positions['success']:
-        if len(current_positions['result']) > 0:
-            latest_position = current_positions['result'][0]
-            if latest_position['size'] > 0:
-                return latest_position
+        for position in current_positions['result']:
+            if position['size'] > 0:
+                return position
         return {}
     raise Exception('request failed to retrieve account positions')
 
